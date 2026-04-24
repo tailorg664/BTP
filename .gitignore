@@ -35,3 +35,7 @@ dist/
 # Misc
 *.bak
 *.swp
+
+# Secret
+.streamlit
+secrets.toml
