@@ -9,22 +9,22 @@ import streamlit.components.v1 as components
 import plotly.express as px
 from openai import OpenAI
 
-st.set_page_config(page_title="Heavy Fleet Route Operations", layout="wide")
+st.set_page_config(page_title="Heavy Fleet Mission Operations", layout="wide")
 
 # --- UI State & Ledgers (Expanded for Full AI Control) ---
 if 'fleet_state' not in st.session_state: st.session_state['fleet_state'] = {}
 if 'maintenance_resets' not in st.session_state: st.session_state['maintenance_resets'] = {}
-if 'selected_routes' not in st.session_state: st.session_state['selected_routes'] = []
+if 'selected_missions' not in st.session_state: st.session_state['selected_missions'] = []
 if 'uploader_key' not in st.session_state: st.session_state['uploader_key'] = 0
 if 'notif_key' not in st.session_state: st.session_state['notif_key'] = 0
-if 'route_string_sidebar' not in st.session_state: st.session_state['route_string_sidebar'] = "60, 45, 80, 110"
-if 'route_string_manager' not in st.session_state: st.session_state['route_string_manager'] = "60, 45, 80, 110"
+if 'mission_string_sidebar' not in st.session_state: st.session_state['mission_string_sidebar'] = "60, 45, 80, 110"
+if 'mission_string_manager' not in st.session_state: st.session_state['mission_string_manager'] = "60, 45, 80, 110"
 
 # AI Specific Memory States
 if 'ai_error' not in st.session_state: st.session_state['ai_error'] = None
-if 'ai_harsh_routes' not in st.session_state: st.session_state['ai_harsh_routes'] = set()
-if 'ai_etops_routes' not in st.session_state: st.session_state['ai_etops_routes'] = set()
-if 'ai_priority_routes' not in st.session_state: st.session_state['ai_priority_routes'] = set()
+if 'ai_harsh_missions' not in st.session_state: st.session_state['ai_harsh_missions'] = set()
+if 'ai_etops_missions' not in st.session_state: st.session_state['ai_etops_missions'] = set()
+if 'ai_priority_missions' not in st.session_state: st.session_state['ai_priority_missions'] = set()
 
 # Economics & Operational Default States (Bound to UI later)
 if 'econ_rev' not in st.session_state: st.session_state['econ_rev'] = 8000.0
@@ -54,19 +54,19 @@ def run_ai_agent():
         
         Convert the intent of these messages into a JSON object using ONLY these keys:
         
-        1. 'add_routes': [List of integers]. Extract new cycle lengths mentioned for creating routes (e.g. "opening a new route of 30 cycles" -> [30]).
+        1. 'add_missions': [List of integers]. Extract new cycle lengths mentioned for creating missions (e.g. "opening a new mission of 30 cycles" -> [30]).
         2. 'off_duty_engines': [List of integers]. Extract Engine/Unit IDs that are grounded, stopped, or called off duty for any reason (e.g. "Unit 1 was called off duty" -> [1]).
         3. 'send_to_maint': [List of integers]. Extract Engine/Unit IDs that broke down or explicitly need maintenance.
         4. 'complete_maint': [List of integers]. Extract Engine/Unit IDs that finished maintenance, are cleared, or ready to return to the viable pool (e.g. "Unit 3 maintenance complete. Asset is cleared" -> [3]).
         
-        ROUTE-SPECIFIC FLAGS (If a message targets a specific route like "Route 3" or "Route_3", extract the integer 3):
-        5. 'harsh_routes': [List of integers]. Routes with sandstorms, harsh weather, or qualitative recommendations to use a harsh multiplier (e.g. "Sandstorm on Route_3. Harsh multiplier recommended" -> [3]).
-        6. 'etops_routes': [List of integers]. Routes with oceanic, water, or ETOPS warnings.
-        7. 'priority_routes': [List of integers]. Routes marked as VIP, urgent, or high priority.
-        8. 'dispatch_routes': [List of strings]. Exact route names specifically requested for today's dispatch (e.g. "we need to go on Route_2" -> ["Route_2"]).
+        ROUTE-SPECIFIC FLAGS (If a message targets a specific mission like "Mission 3" or "Mission_3", extract the integer 3):
+        5. 'harsh_missions': [List of integers]. Missions with sandstorms, harsh weather, or qualitative recommendations to use a harsh multiplier (e.g. "Sandstorm on Mission_3. Harsh multiplier recommended" -> [3]).
+        6. 'etops_missions': [List of integers]. Missions with oceanic, water, or ETOPS warnings.
+        7. 'priority_missions': [List of integers]. Missions marked as VIP, urgent, or high priority.
+        8. 'dispatch_missions': [List of strings]. Exact mission names specifically requested for today's dispatch (e.g. "we need to go on Mission_2" -> ["Mission_2"]).
         
         GLOBAL PARAMETERS:
-        9. 'update_params': {{Dictionary}}. ONLY use this if a global numerical setting is explicitly changed to a specific number (e.g. "Change the global harsh multiplier to 2.0" -> {{"harsh_multiplier": 2.0}}). DO NOT put route-specific qualitative warnings here.
+        9. 'update_params': {{Dictionary}}. ONLY use this if a global numerical setting is explicitly changed to a specific number (e.g. "Change the global harsh multiplier to 2.0" -> {{"harsh_multiplier": 2.0}}). DO NOT put mission-specific qualitative warnings here.
         
         Return ONLY valid JSON. If a category has no matches, return an empty list [].
         """
@@ -79,11 +79,11 @@ def run_ai_agent():
         
         plan = json.loads(response.choices[0].message.content)
 
-        if plan.get('add_routes'):
-            current_routes = st.session_state['route_string_sidebar']
-            for r in plan['add_routes']: current_routes += f", {r}"
-            st.session_state['route_string_sidebar'] = current_routes
-            st.session_state['route_string_manager'] = current_routes
+        if plan.get('add_missions'):
+            current_missions = st.session_state['mission_string_sidebar']
+            for r in plan['add_missions']: current_missions += f", {r}"
+            st.session_state['mission_string_sidebar'] = current_missions
+            st.session_state['mission_string_manager'] = current_missions
             
         if plan.get('off_duty_engines'):
             for eid in plan['off_duty_engines']:
@@ -102,17 +102,17 @@ def run_ai_agent():
                         u_df = df[df['unit'] == target_id]
                         if not u_df.empty: st.session_state['maintenance_resets'][target_id] = u_df['cycle'].max()
 
-        if plan.get('harsh_routes'):
-            for r_num in plan['harsh_routes']: st.session_state['ai_harsh_routes'].add(f"Route_{r_num}")
-        if plan.get('etops_routes'):
-            for r_num in plan['etops_routes']: st.session_state['ai_etops_routes'].add(f"Route_{r_num}")
-        if plan.get('priority_routes'):
-            for r_num in plan['priority_routes']: st.session_state['ai_priority_routes'].add(f"Route_{r_num}")
+        if plan.get('harsh_missions'):
+            for r_num in plan['harsh_missions']: st.session_state['ai_harsh_missions'].add(f"Mission_{r_num}")
+        if plan.get('etops_missions'):
+            for r_num in plan['etops_missions']: st.session_state['ai_etops_missions'].add(f"Mission_{r_num}")
+        if plan.get('priority_missions'):
+            for r_num in plan['priority_missions']: st.session_state['ai_priority_missions'].add(f"Mission_{r_num}")
 
-        if plan.get('dispatch_routes'):
-            for r_name in plan['dispatch_routes']:
-                if r_name not in st.session_state['selected_routes']:
-                    st.session_state['selected_routes'].append(r_name)
+        if plan.get('dispatch_missions'):
+            for r_name in plan['dispatch_missions']:
+                if r_name not in st.session_state['selected_missions']:
+                    st.session_state['selected_missions'].append(r_name)
 
         if plan.get('update_params'):
             p = plan['update_params']
@@ -159,15 +159,15 @@ if 'last_rollback_time' not in st.session_state: st.session_state['last_rollback
 if 'notifications_df' not in st.session_state: 
     st.session_state['notifications_df'] = pd.DataFrame(columns=['timestamp', 'from', 'message'])
 
-def sync_to_manager(): st.session_state['route_string_manager'] = st.session_state['route_string_sidebar']
-def sync_to_sidebar(): st.session_state['route_string_sidebar'] = st.session_state['route_string_manager']
-def clear_route_selection(): st.session_state['selected_routes'] = []
+def sync_to_manager(): st.session_state['mission_string_manager'] = st.session_state['mission_string_sidebar']
+def sync_to_sidebar(): st.session_state['mission_string_sidebar'] = st.session_state['mission_string_manager']
+def clear_mission_selection(): st.session_state['selected_missions'] = []
 
 def commit_deployments(assign_df):
     for _, row in assign_df.iterrows():
         if row['Action'] == 'DEPLOY': 
             st.session_state['fleet_state'][int(row['Engine'])] = 'ON_DUTY'
-    st.session_state['selected_routes'] = []
+    st.session_state['selected_missions'] = []
     st.session_state['last_assignment_time'] = pd.Timestamp.now(tz='Asia/Kolkata')
     st.toast("ASSETS DEPLOYED SUCCESSFULLY!", icon="🚀")
 
@@ -206,10 +206,10 @@ class SEBlock(layers.Layer):
 
 RUL_CAP, WINDOW_SIZE = 125.0, 50
 
-def get_survival_prob(q05, q50, q95, route_len): 
-    return float(np.interp(route_len, [0.0, q05, q50, q95, q95 * 1.5], [1.0, 0.95, 0.50, 0.05, 0.0]))
+def get_survival_prob(q05, q50, q95, mission_len): 
+    return float(np.interp(mission_len, [0.0, q05, q50, q95, q95 * 1.5], [1.0, 0.95, 0.50, 0.05, 0.0]))
 
-def execute_fleet_logic(engines, master_routes, active_routes, econ, determ_buffer, viable_threshold, harsh_mult, prio_mult, mode='probabilistic'):
+def execute_fleet_logic(engines, master_missions, active_missions, econ, determ_buffer, viable_threshold, harsh_mult, prio_mult, mode='probabilistic'):
     viable_engines, assignments, total_profit = [], [], 0.0
     
     for e in engines:
@@ -221,7 +221,7 @@ def execute_fleet_logic(engines, master_routes, active_routes, econ, determ_buff
             continue
 
         is_viable = False
-        for r in master_routes:
+        for r in master_missions:
             eff_len = r['Length'] * harsh_mult if r['Harsh'] else r['Length']
             if r['ETOPS'] and e['q05'] < eff_len: continue 
             if mode == 'probabilistic' and get_survival_prob(e['q05'], e['q50'], e['q95'], eff_len) >= viable_threshold: is_viable = True; break
@@ -232,46 +232,46 @@ def execute_fleet_logic(engines, master_routes, active_routes, econ, determ_buff
         if is_viable: viable_engines.append(e)
         else: total_profit += maint_ev
             
-    n_eng, n_route = len(viable_engines), len(active_routes)
+    n_eng, n_mission = len(viable_engines), len(active_missions)
     unfulfilled_count = 0
     
-    if n_route > 0:
-        cost_matrix = np.zeros((n_eng + n_route, n_eng + n_route))
-        for i in range(n_eng + n_route):
-            for j in range(n_eng + n_route):
-                if i < n_eng and j < n_route: 
-                    eff_len = active_routes[j]['Length'] * harsh_mult if active_routes[j]['Harsh'] else active_routes[j]['Length']
-                    if active_routes[j]['ETOPS'] and viable_engines[i]['q05'] < eff_len: cost_matrix[i, j] = 1e9; continue
+    if n_mission > 0:
+        cost_matrix = np.zeros((n_eng + n_mission, n_eng + n_mission))
+        for i in range(n_eng + n_mission):
+            for j in range(n_eng + n_mission):
+                if i < n_eng and j < n_mission: 
+                    eff_len = active_missions[j]['Length'] * harsh_mult if active_missions[j]['Harsh'] else active_missions[j]['Length']
+                    if active_missions[j]['ETOPS'] and viable_engines[i]['q05'] < eff_len: cost_matrix[i, j] = 1e9; continue
                     p_surv = get_survival_prob(viable_engines[i]['q05'], viable_engines[i]['q50'], viable_engines[i]['q95'], eff_len)
                     if mode == 'probabilistic':
-                        cost_matrix[i, j] = -((p_surv * (econ['rev'] * active_routes[j]['Length'] - econ['op'] * active_routes[j]['Length'])) - ((1.0 - p_surv) * (econ['op'] * active_routes[j]['Length'] + econ['fail'])))
+                        cost_matrix[i, j] = -((p_surv * (econ['rev'] * active_missions[j]['Length'] - econ['op'] * active_missions[j]['Length'])) - ((1.0 - p_surv) * (econ['op'] * active_missions[j]['Length'] + econ['fail'])))
                     else:
-                        cost_matrix[i, j] = -((econ['rev'] * active_routes[j]['Length']) - (econ['op'] * active_routes[j]['Length'])) if viable_engines[i]['q50'] >= eff_len + determ_buffer else econ['fail']
-                elif i >= n_eng and j < n_route: 
-                    cost_matrix[i, j] = econ['unfulfilled'] * prio_mult if active_routes[j]['Priority'] else econ['unfulfilled'] 
+                        cost_matrix[i, j] = -((econ['rev'] * active_missions[j]['Length']) - (econ['op'] * active_missions[j]['Length'])) if viable_engines[i]['q50'] >= eff_len + determ_buffer else econ['fail']
+                elif i >= n_eng and j < n_mission: 
+                    cost_matrix[i, j] = econ['unfulfilled'] * prio_mult if active_missions[j]['Priority'] else econ['unfulfilled'] 
         
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
-        idle_engines = [viable_engines[i] for i, j in zip(row_ind, col_ind) if i < n_eng and j >= n_route]
+        idle_engines = [viable_engines[i] for i, j in zip(row_ind, col_ind) if i < n_eng and j >= n_mission]
 
         for i, j in zip(row_ind, col_ind):
-            if i < n_eng and j < n_route: 
-                e, r = viable_engines[i], active_routes[j]
+            if i < n_eng and j < n_mission: 
+                e, r = viable_engines[i], active_missions[j]
                 p_surv = get_survival_prob(e['q05'], e['q50'], e['q95'], r['Length'] * harsh_mult if r['Harsh'] else r['Length'])
                 true_ev = (p_surv * (econ['rev'] * r['Length'] - econ['op'] * r['Length'])) - ((1.0 - p_surv) * (econ['op'] * r['Length'] + econ['fail']))
                 total_profit += true_ev
                 
-                target_name = r['Route'] + (" 🌊" if r['ETOPS'] else "") + (" 🏜️" if r['Harsh'] else "") + (" ⭐" if r['Priority'] else "")
-                assignments.append({'Route_Target': target_name, 'Engine': str(e['id']), 'Action': 'DEPLOY', 'P_Surv': p_surv, 'True_EV': true_ev})
-            elif i >= n_eng and j < n_route: 
-                r = active_routes[j]
+                target_name = r['Mission'] + (" 🌊" if r['ETOPS'] else "") + (" 🏜️" if r['Harsh'] else "") + (" ⭐" if r['Priority'] else "")
+                assignments.append({'Mission_Target': target_name, 'Engine': str(e['id']), 'Action': 'DEPLOY', 'P_Surv': p_surv, 'True_EV': true_ev})
+            elif i >= n_eng and j < n_mission: 
+                r = active_missions[j]
                 penalty = econ['unfulfilled'] * prio_mult if r['Priority'] else econ['unfulfilled']
                 total_profit -= penalty
                 unfulfilled_count += 1
                 
-                target_name = r['Route'] + (" 🌊" if r['ETOPS'] else "") + (" 🏜️" if r['Harsh'] else "") + (" ⭐" if r['Priority'] else "")
-                assignments.append({'Route_Target': target_name, 'Engine': "INSUFFICIENT ENGINES" if not idle_engines else "ECONOMIC REASON", 'Action': 'UNFULFILLED', 'P_Surv': np.nan, 'True_EV': -penalty})
+                target_name = r['Mission'] + (" 🌊" if r['ETOPS'] else "") + (" 🏜️" if r['Harsh'] else "") + (" ⭐" if r['Priority'] else "")
+                assignments.append({'Mission_Target': target_name, 'Engine': "INSUFFICIENT ENGINES" if not idle_engines else "ECONOMIC REASON", 'Action': 'UNFULFILLED', 'P_Surv': np.nan, 'True_EV': -penalty})
                 
-    assign_df = pd.DataFrame(assignments).sort_values('Route_Target') if assignments else pd.DataFrame(columns=['Route_Target', 'Engine', 'Action', 'P_Surv', 'True_EV'])
+    assign_df = pd.DataFrame(assignments).sort_values('Mission_Target') if assignments else pd.DataFrame(columns=['Mission_Target', 'Engine', 'Action', 'P_Surv', 'True_EV'])
     return assign_df, total_profit, unfulfilled_count
 
 # --- Sidebar UI ---
@@ -319,8 +319,8 @@ with st.sidebar:
         st.toast("FLIGHT LOGS APPENDED & DUTY ROSTER UPDATED!", icon="✅")
         st.rerun()
 
-    st.header("All Possible Routes")
-    st.text_input("Comma separated cycles", key="route_string_sidebar", on_change=sync_to_manager)
+    st.header("All Possible Missions")
+    st.text_input("Comma separated cycles", key="mission_string_sidebar", on_change=sync_to_manager)
 
     with st.expander("Economic Parameters", expanded=False):
         rev_per_cycle = st.number_input("Revenue per Cycle ($)", step=1000.0, key="econ_rev")
@@ -407,15 +407,15 @@ if X_input:
             e.update({'q05': (preds[0][idx][0] * RUL_CAP), 'q50': (preds[1][idx][0] * RUL_CAP), 'q95': (preds[2][idx][0] * RUL_CAP)})
             idx += 1
 
-lengths = [int(x.strip()) for x in st.session_state['route_string_manager'].split(',') if x.strip().isdigit()]
+lengths = [int(x.strip()) for x in st.session_state['mission_string_manager'].split(',') if x.strip().isdigit()]
 
 grid = [
     {
-        "Route": f"Route_{i+1}", 
+        "Mission": f"Mission_{i+1}", 
         "Length": l, 
-        "ETOPS": (f"Route_{i+1}" in st.session_state['ai_etops_routes']), 
-        "Harsh": (f"Route_{i+1}" in st.session_state['ai_harsh_routes']), 
-        "Priority": (f"Route_{i+1}" in st.session_state['ai_priority_routes'])
+        "ETOPS": (f"Mission_{i+1}" in st.session_state['ai_etops_missions']), 
+        "Harsh": (f"Mission_{i+1}" in st.session_state['ai_harsh_missions']), 
+        "Priority": (f"Mission_{i+1}" in st.session_state['ai_priority_missions'])
     } 
     for i, l in enumerate(lengths)
 ]
@@ -435,7 +435,7 @@ for e in engine_pool:
 # --- Global Dashboard ---
 header_col1, header_col2 = st.columns([8, 1])
 with header_col1:
-    st.title("Heavy Fleet Route Operations")
+    st.title("Heavy Fleet Mission Operations")
 with header_col2:
     st.markdown("<br>", unsafe_allow_html=True)
     num_alerts = len(st.session_state['notifications_df'])
@@ -514,16 +514,16 @@ st.markdown("### Executive System Control")
 
 with st.expander("🛠️ Mission Control Constraints", expanded=False):
     col1, col2, col3 = st.columns([2, 1, 1])
-    with col1: st.text_input("Master Route Pool", key="route_string_manager", on_change=sync_to_sidebar)
+    with col1: st.text_input("Master Mission Pool", key="mission_string_manager", on_change=sync_to_sidebar)
     with col2: harsh_multiplier = st.number_input("Harsh Environment", step=0.1, key="harsh_env_val")
     with col3: priority_multiplier = st.number_input("Priority VIP Penalty", step=0.5, key="prio_mult")
 
-    master_route_configs = st.data_editor(
+    master_mission_configs = st.data_editor(
         pd.DataFrame(grid), 
         hide_index=True, 
         use_container_width=True,
         column_config={
-            "Route": st.column_config.TextColumn("Target Name", disabled=True),
+            "Mission": st.column_config.TextColumn("Target Name", disabled=True),
             "Length": st.column_config.NumberColumn("Cycles", disabled=True),
             "ETOPS": st.column_config.CheckboxColumn("🌊 ETOPS"),
             "Harsh": st.column_config.CheckboxColumn("🏜️ Harsh Env"),
@@ -535,12 +535,12 @@ compare_mode = st.checkbox("Compare with Legacy Deterministic Model", value=Fals
 tab1, tab2 = st.tabs(["1. Fleet Status", "2. Deployment Assignments"])
 
 with tab2:
-    st.markdown("### Executive Route Selector")
-    st.multiselect("Select flights requiring dispatch today:", options=[r['Route'] for r in master_route_configs], key='selected_routes')
-    active_route_configs = [r for r in master_route_configs if r['Route'] in st.session_state['selected_routes']]
+    st.markdown("### Executive Mission Selector")
+    st.multiselect("Select flights requiring dispatch today:", options=[r['Mission'] for r in master_mission_configs], key='selected_missions')
+    active_mission_configs = [r for r in master_mission_configs if r['Mission'] in st.session_state['selected_missions']]
 
-prob_assign, prob_total, prob_unf = execute_fleet_logic(engine_pool, master_route_configs, active_route_configs, econ_params, determ_buffer, viable_prob_check, harsh_multiplier, priority_multiplier, mode='probabilistic')
-det_assign, det_total, det_unf = execute_fleet_logic(engine_pool, master_route_configs, active_route_configs, econ_params, determ_buffer, viable_prob_check, harsh_multiplier, priority_multiplier, mode='deterministic')
+prob_assign, prob_total, prob_unf = execute_fleet_logic(engine_pool, master_mission_configs, active_mission_configs, econ_params, determ_buffer, viable_prob_check, harsh_multiplier, priority_multiplier, mode='probabilistic')
+det_assign, det_total, det_unf = execute_fleet_logic(engine_pool, master_mission_configs, active_mission_configs, econ_params, determ_buffer, viable_prob_check, harsh_multiplier, priority_multiplier, mode='deterministic')
 
 def style_assign(df):
     if df.empty: return df
@@ -576,25 +576,25 @@ with tab1:
                 if st.button("⏪ Abort Maint.", key=f"abt_{eid}"): st.session_state['fleet_state'][eid] = 'VIABLE'; st.rerun()
 
 with tab2:
-    if not active_route_configs:
-        st.info("Select routes above to view optimal asset deployment.")
+    if not active_mission_configs:
+        st.info("Select missions above to view optimal asset deployment.")
     else:
         st.markdown("---")
         if compare_mode:
             col1, col2 = st.columns(2)
             with col1: 
                 st.success(f"**Q-TFT Expected Profit:** ${prob_total:,.2f}")
-                st.markdown(f"**Unfulfilled Routes:** {prob_unf}")
+                st.markdown(f"**Unfulfilled Missions:** {prob_unf}")
                 if not prob_assign.empty: st.button("🚀 Commit Probabilistic Assignment", type="primary", on_click=commit_deployments, args=(prob_assign,))
             with col2: 
                 st.error(f"**Legacy Expected Profit:** ${det_total:,.2f}")
-                st.markdown(f"**Unfulfilled Routes:** {det_unf}")
+                st.markdown(f"**Unfulfilled Missions:** {det_unf}")
                 
             tc1, tc2 = st.columns(2)
             with tc1: st.markdown("**Probabilistic Matrix**"); st.dataframe(style_assign(prob_assign), use_container_width=True, hide_index=True)
             with tc2: st.markdown("**Deterministic Matrix**"); st.dataframe(style_assign(det_assign), use_container_width=True, hide_index=True)
         else:
             st.success(f"**Total Expected Profit:** ${prob_total:,.2f}")
-            st.markdown(f"**Unfulfilled Routes:** {prob_unf}")
+            st.markdown(f"**Unfulfilled Missions:** {prob_unf}")
             if not prob_assign.empty: st.button("🚀 Commit Assignment", type="primary", on_click=commit_deployments, args=(prob_assign,))
             st.dataframe(style_assign(prob_assign), use_container_width=True, hide_index=True)
